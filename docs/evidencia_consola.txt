@@ -1,0 +1,318 @@
+
+============================================================================
+  P01 - Representacion de Grafos Viales (Matriz vs Lista vs Implicito)
+============================================================================
+Red de 12 nodos | Lista: d(0->11)=17.63 (ops=51) | Matriz: d(0->11)=17.63 (ops=288)
+Malla 3x4 implicita | d(0->11)=4.65 (ops=46) | identica a la version materializada: True
+Teoria: con V=50,000 una matriz de doubles ocuparia 20 GB; una lista con E=3V, ~5.6 MB.
+
+============================================================================
+  P01 - Benchmark Memoria y Dijkstra (Red Dispersa E ~ 3V, mismo V en las 3 estructuras)
+============================================================================
++------+-----------+-----------+------------+------------+---------------+-------------------+
+| V    | Lista mem | Dij Lista | Matriz mem | Dij Matriz | Implicito mem | Dij Implicito     |
++------+-----------+-----------+------------+------------+---------------+-------------------+
+| 100  | 18.7 KB   | 0.040 ms  | 85.0 KB    | 0.626 ms   | 0.34 KB       | 0.281 ms (V=100)  |
+| 250  | 41.5 KB   | 0.113 ms  | 504.6 KB   | 3.748 ms   | 0.33 KB       | 0.818 ms (V=255)  |
+| 500  | 89.8 KB   | 0.266 ms  | 1985.1 KB  | 17.414 ms  | 0.35 KB       | 1.630 ms (V=506)  |
+| 1000 | 189.1 KB  | 0.549 ms  | 7876.4 KB  | 74.126 ms  | 0.34 KB       | 3.426 ms (V=1023) |
++------+-----------+-----------+------------+------------+---------------+-------------------+
+Lectura: la matriz crece ~V^2 en memoria y tiempo; lista e implicito crecen ~V. El implicito no guarda aristas (memoria ~constante) pero solo sirve si los vecinos se pueden calcular por regla.
+
+============================================================================
+  P02 - Ruteo en Tiempo Real Ante Cierre de Via Arterial (500 Vehiculos)
+============================================================================
+Via arterial cerrada (bloqueo total): 4 <-> 39 | usada por 48 de 500 rutas
+Vehiculos afectados (su ruta usaba la via): 48 -> costo extra de esas rutas: +19.0%
++----------------------------------------------+----------------+------------------+
+| Estrategia de recalculo                      | Tiempo         | Nodos expandidos |
++----------------------------------------------+----------------+------------------+
+| Dijkstra, los 500                            | 23.3 ms        | 40933            |
+| A* euclidiana, los 500                       | 23.3 ms        | 24646            |
+| A* euclidiana, solo 48 afectados             | 3.5 ms         | 4118             |
+| CH: reconstruir (283 atajos) + 500 consultas | 32.2 + 10.8 ms | -                |
++----------------------------------------------+----------------+------------------+
+A* da el mismo costo que Dijkstra en las 500 rutas: True | CH coincide con Dijkstra: True
+
+Admisibilidad de la heuristica (rutas de A* mas caras que Dijkstra):
++---------------------------------------------+------------------+-----------------+
+| Escenario                                   | Rutas suboptimas | Peor sobrecosto |
++---------------------------------------------+------------------+-----------------+
+| red euclidiana + h euclidiana               | 0/500            | 0.0%            |
+| red Manhattan + h Manhattan                 | 0/500            | 0.0%            |
+| red euclidiana + h Manhattan (NO admisible) | 36/500           | 6.1%            |
++---------------------------------------------+------------------+-----------------+
+Nota: si la via solo SUBE de peso (cierre) la heuristica sigue admisible; si BAJA (reapertura) las rutas previas pueden dejar de ser optimas y hay que revalidar a todos los vehiculos cuyo trayecto pudiera aprovecharla.
+
+============================================================================
+  P02 - Benchmark Recalculo de 500 Vehiculos tras Cierre (con Floyd-Warshall y CH)
+============================================================================
++-----+-----------+--------------------+-----------------+-------------------+----------------+---------------------+
+| V   | Afectados | Dijkstra 500 (exp) | A* 500 (exp)    | A* solo afectados | CH build+query | Floyd-Warshall      |
++-----+-----------+--------------------+-----------------+-------------------+----------------+---------------------+
+| 80  | 77        | 11.0 ms (20380)    | 11.4 ms (12875) | 2.6 ms            | 9+4.9 ms       | 12 ms               |
+| 140 | 49        | 20.4 ms (35589)    | 21.8 ms (23177) | 3.4 ms            | 23+7.5 ms      | 61 ms               |
+| 220 | 64        | 34.5 ms (56761)    | 34.0 ms (35345) | 5.1 ms            | 53+13.1 ms     | 335 ms              |
+| 400 | 50        | 67.4 ms (99740)    | 66.4 ms (61673) | 9.0 ms            | 158+19.5 ms    | ~2011 ms (est. V^3) |
++-----+-----------+--------------------+-----------------+-------------------+----------------+---------------------+
+Lectura: A* expande menos nodos que Dijkstra; recalcular solo los afectados es la mayor ganancia; en Python el costo de evaluar la heuristica compensa el ahorro de nodos (el tiempo es similar); CH consulta rapido pero reconstruirla tras cada cierre cuesta mas que recalcular; Floyd-Warshall crece ~V^3.
+
+============================================================================
+  P03 - Cross-Docking (3 Flujos + Indice Hash + Aging O(1)): 80% de trafico prioritario
+============================================================================
++-----------------------+------------+-------------+---------------------+------------+--------------------+
+| Politica              | Flujo      | Despachados | Espera prom (ticks) | Espera max | Deadlines vencidos |
++-----------------------+------------+-------------+---------------------+------------+--------------------+
+| sin aging             | standard   | 101         | 75.7                | 123        | 52                 |
+| sin aging             | perishable | 246         | 0.5                 | 7          | 0                  |
+| sin aging             | high_value | 253         | 0.1                 | 2          | 0                  |
+| con aging (umbral 15) | standard   | 101         | 55.2                | 109        | 30                 |
+| con aging (umbral 15) | perishable | 246         | 8.9                 | 22         | 2                  |
+| con aging (umbral 15) | high_value | 253         | 0.1                 | 2          | 0                  |
++-----------------------+------------+-------------+---------------------+------------+--------------------+
+Consulta O(1) por indice hash: PKG-00010 -> estado=dispatched, tipo=standard, despachado en tick 3
+
+============================================================================
+  P03 - Benchmark Simulacion Banda Cross-Docking (escalado)
+============================================================================
++----------+--------------+------------------+----------+---------------------+--------------------+
+| Paquetes | Tiempo total | vs fila anterior | Peak mem | Espera std prom/max | Promovidos (aging) |
++----------+--------------+------------------+----------+---------------------+--------------------+
+| 1000     | 11.7 ms      | -                | 263 KB   | 16.0 / 51           | 106                |
+| 2000     | 25.1 ms      | x2.15            | 568 KB   | 30.5 / 100          | 716                |
+| 4000     | 52.0 ms      | x2.07            | 1173 KB  | 62.6 / 200          | 1872               |
+| 8000     | 116.6 ms     | x2.24            | 2398 KB  | 126.9 / 400         | 4246               |
+| 16000    | 225.9 ms     | x1.94            | 4956 KB  | 255.4 / 800         | 9012               |
++----------+--------------+------------------+----------+---------------------+--------------------+
+Lectura: al duplicar n el tiempo crece ~x2 (O(n log n) total), no ~x4: ya no hay recorrido O(n) por despacho.
+
+============================================================================
+  P04 - Indexacion de Guias (LX-94820-MED): borrado, rehash y sharding
+============================================================================
+Guia LX-98573-BOG | alpha=0.40 | encontrada=True | sondas=1 | capacidad primo=1009
+Tras delete: encontrada=False | otra guia sigue visible=True | lapidas=1
+Rehash automatico (alpha<=0.7): 400 guias desde capacidad 16 -> capacidad 673, rehashes=5, alpha=0.59
+Sharding x8 con 20,000 guias: tamanos [2512, 2565, 2475, 2541, 2420, 2501, 2522, 2464] (desbalance max/min = 1.06)
+Escala LogiX: 20,000,000 consultas/dia = ~231.5 req/s promedio; con picos 5x-15x -> ~1,200-3,500 req/s.
+
+============================================================================
+  P04 - Sondas por busqueda vs alpha (capacidad primo 10007) - medido vs teoria
+============================================================================
++-------+-----------+-----------------------+-----------------------+--------------+----------------------+
+| alpha | Esquema   | Sondas exito (medido) | Sondas exito (teoria) | Sondas fallo | Inserciones fallidas |
++-------+-----------+-----------------------+-----------------------+--------------+----------------------+
+| 0.30  | chained   | 1.14                  | 1.15                  | 1.04         | 0                    |
+| 0.30  | linear    | 1.20                  | 1.21                  | 1.50         | 0                    |
+| 0.30  | quadratic | 1.19                  | 1.21                  | 1.49         | 0                    |
+| 0.30  | double    | 1.18                  | 1.19                  | 1.44         | 0                    |
+| 0.50  | chained   | 1.25                  | 1.25                  | 1.12         | 0                    |
+| 0.50  | linear    | 1.48                  | 1.50                  | 2.46         | 0                    |
+| 0.50  | quadratic | 1.41                  | 1.44                  | 2.14         | 0                    |
+| 0.50  | double    | 1.38                  | 1.39                  | 2.03         | 0                    |
+| 0.70  | chained   | 1.35                  | 1.35                  | 1.20         | 0                    |
+| 0.70  | linear    | 2.14                  | 2.17                  | 6.23         | 0                    |
+| 0.70  | quadratic | 1.80                  | 1.85                  | 3.61         | 0                    |
+| 0.70  | double    | 1.70                  | 1.72                  | 3.38         | 0                    |
+| 0.90  | chained   | 1.45                  | 1.45                  | 1.32         | 0                    |
+| 0.90  | linear    | 4.88                  | 5.50                  | 35.26        | 0                    |
+| 0.90  | quadratic | 2.73                  | 2.85                  | 10.94        | 0                    |
+| 0.90  | double    | 2.58                  | 2.56                  | 9.92         | 0                    |
+| 0.95  | chained   | 1.47                  | 1.48                  | 1.35         | 0                    |
+| 0.95  | linear    | 7.23                  | 10.50                 | 82.89        | 0                    |
+| 0.95  | quadratic | 3.34                  | 3.52                  | 21.62        | 0                    |
+| 0.95  | double    | 3.16                  | 3.15                  | 20.27        | 0                    |
++-------+-----------+-----------------------+-----------------------+--------------+----------------------+
+
+============================================================================
+  P04 - Funcion hash: FNV-1a vs polinomica (encadenamiento, alpha=0.7, memoria con tracemalloc)
+============================================================================
++--------------------+------------------+---------------------+--------------+--------------+
+| Estructura/Hash    | Cadena mas larga | Buckets vacios      | Sondas exito | Memoria pico |
++--------------------+------------------+---------------------+--------------+--------------+
+| FNV-1a             | 7                | 49.5% (ideal 49.7%) | 1.35         | 1059 KB      |
+| Polinomica b=131   | 5                | 49.2% (ideal 49.7%) | 1.34         | 1173 KB      |
+| OA linear (FNV-1a) | -                | -                   | 2.14         | 157 KB       |
+| OA double (FNV-1a) | -                | -                   | 1.70         | 157 KB       |
++--------------------+------------------+---------------------+--------------+--------------+
+
+============================================================================
+  P04 - Rendimiento a escala: 100,000 guias, 100,000 consultas (alpha=0.7 en direccionamiento abierto)
+============================================================================
++-----------------------------------+---------------+----------------+---------------------+----------+
+| Estructura                        | Insertar 100k | 100k consultas | Rendimiento         | Aciertos |
++-----------------------------------+---------------+----------------+---------------------+----------+
+| Encadenamiento (max_load=1.0)     | 461 ms        | 193 ms         | 519,201 consultas/s | 100000   |
+| Abierto doble hash (max_load=0.7) | 923 ms        | 386 ms         | 258,795 consultas/s | 100000   |
+| Sharded x8 encadenado             | 539 ms        | 329 ms         | 303,934 consultas/s | 100000   |
++-----------------------------------+---------------+----------------+---------------------+----------+
+Referencia: promedio 231.5 req/s, picos ~3,500 req/s -> una sola tabla en memoria (en Python) ya cubre el pico con holgura.
+
+============================================================================
+  P05 - Jerarquia N-aria: inspeccion aduanera (DFS vs BFS vs indice + ascenso por padre)
+============================================================================
+Paquete inspeccionado: PKG-001-002-003-004
++--------------------------------+------------------+------------------+--------------------------+
+| Contenedor consultado          | DFS              | BFS              | Hash + ascenso por padre |
++--------------------------------+------------------+------------------+--------------------------+
+| CONT-001 (contiene el paquete) | True (76 nodos)  | True (76 nodos)  | True (4 pasos)           |
+| CONT-002 (NO lo contiene)      | False (76 nodos) | False (76 nodos) | False (4 pasos)          |
++--------------------------------+------------------+------------------+--------------------------+
+El caso negativo es el peor para DFS/BFS: recorren TODO el contenedor; el ascenso por padre sigue en <= 4 pasos.
+
+============================================================================
+  P05 - Benchmark inspeccion aduanera (peor caso: paquete ausente o ultimo del contenedor)
+============================================================================
++------------------+---------------------+---------------------+---------------+---------------+----------------------+
+| Nodos/contenedor | DFS ultimo: vis/mem | BFS ultimo: vis/mem | DFS ausente   | BFS ausente   | Hash+padre (ausente) |
++------------------+---------------------+---------------------+---------------+---------------+----------------------+
+| 225              | 225 / 0.3KB         | 225 / 2.3KB         | 225 (0.31ms)  | 225 (0.10ms)  | 4 pasos (0.3us)      |
+| 449              | 449 / 0.3KB         | 449 / 4.4KB         | 449 (0.67ms)  | 449 (0.26ms)  | 4 pasos (0.3us)      |
+| 897              | 897 / 0.4KB         | 897 / 7.5KB         | 897 (1.58ms)  | 897 (0.68ms)  | 4 pasos (0.4us)      |
+| 1793             | 1793 / 0.6KB        | 1793 / 13.7KB       | 1793 (3.21ms) | 1793 (1.30ms) | 4 pasos (0.3us)      |
++------------------+---------------------+---------------------+---------------+---------------+----------------------+
+Lectura: DFS/BFS crecen linealmente con n (BFS usa mas memoria: cola de todo un nivel); el ascenso es constante.
+
+============================================================================
+  P06 - Codigos Postales (COL-ANT-MED-050022): Trie vs Radix vs AVL
+============================================================================
+Buscar COL-ANT-MED-050022: Trie=True | Radix=True | AVL=True
+Nodos -> Trie: 302 | Radix: 178 | AVL: 120
+Autocompletar 'COL-ANT-MED': 15 codigos, las 3 estructuras coinciden con el filtro ingenuo: True
+Primeros 4 (orden lexicografico): ['COL-ANT-MED-050006', 'COL-ANT-MED-050007', 'COL-ANT-MED-050008', 'COL-ANT-MED-050022']
+
+============================================================================
+  P06 - Benchmark: nodos, memoria, busqueda exacta y autocompletado (mismos datos en las 3 estructuras)
+============================================================================
++---------+----------------+-----------------+---------------+--------------+---------------+-------------+--------------+---------------+-------------+
+| Codigos | Trie nodos/mem | Radix nodos/mem | AVL nodos/mem | Busq Trie ms | Busq Radix ms | Busq AVL ms | Pref Trie ms | Pref Radix ms | Pref AVL ms |
++---------+----------------+-----------------+---------------+--------------+---------------+-------------+--------------+---------------+-------------+
+| 500     | 760 / 131KB    | 674 / 93KB      | 500 / 47KB    | 0.65         | 0.93          | 0.37        | 1.65         | 1.30          | 0.83        |
+| 2000    | 2745 / 476KB   | 2616 / 399KB    | 2000 / 188KB  | 0.55         | 0.46          | 0.31        | 1.57         | 0.74          | 0.48        |
+| 8000    | 10712 / 1860KB | 10446 / 1927KB  | 8000 / 750KB  | 0.33         | 0.51          | 0.36        | 0.92         | 0.85          | 0.52        |
++---------+----------------+-----------------+---------------+--------------+---------------+-------------+--------------+---------------+-------------+
+Lectura honesta: con codigos de 6 digitos densos casi no hay cadenas de un solo hijo que comprimir, asi que Radix ~ Trie (y en Python el diccionario por nodo puede igualar el ahorro). El AVL usa 1 nodo por clave pero su busqueda es O(L log n).
+
+============================================================================
+  P06 - Caso favorable a Radix: claves con cola larga (codigo postal + ruta/puerta de ~24 caracteres)
+============================================================================
++--------+-----------------+-----------------+---------------+----------------------------+
+| Claves | Trie nodos/mem  | Radix nodos/mem | AVL nodos/mem | Compresion                 |
++--------+-----------------+-----------------+---------------+----------------------------+
+| 500    | 12760 / 3233KB  | 674 / 165KB     | 500 / 47KB    | 18.9x menos nodos en Radix |
+| 2000   | 50745 / 12849KB | 2616 / 641KB    | 2000 / 188KB  | 19.4x menos nodos en Radix |
++--------+-----------------+-----------------+---------------+----------------------------+
+Radix gana cuando hay colas largas sin ramificar (matriculas, rutas, geohash largos): cada cola es UNA arista, no ~L nodos.
+
+============================================================================
+  P07 - AVL vs Rojo-Negro: clave compuesta (peso, volumen, id), borrado y consulta por rango
+============================================================================
+AVL        | n=133 tras borrar 1/3 | altura=8 | invariantes OK | pallets con peso en [10,12] kg: 5
+Rojo-Negro | n=133 tras borrar 1/3 | altura=9 | invariantes OK | pallets con peso en [10,12] kg: 5
+Carga 95/5 | AVL: h=11 cmp/lectura=8.18 | RBT: h=11 cmp/lectura=8.32
+Carga 5/95 | AVL: rot/escritura=0.49 | RBT: rot/escritura=0.41
+
+============================================================================
+  P07 - Benchmark AVL vs Rojo-Negro (escrituras = 50% insertar + 50% borrar; 20,000 operaciones)
+============================================================================
++---------------------------+-----------------------------------+----------------------------------+
+| Escenario                 | AVL                               | Rojo-Negro                       |
++---------------------------+-----------------------------------+----------------------------------+
+| n=1000 95% lect / 5% escr | h=12 cmp/L=9.15 rot/E=0.50 34ms   | h=13 cmp/L=9.29 rot/E=0.45 23ms  |
+| n=1000 5% lect / 95% escr | h=12 cmp/L=9.19 rot/E=0.50 153ms  | h=13 cmp/L=9.27 rot/E=0.41 43ms  |
+| n=5000 95% lect / 5% escr | h=15 cmp/L=11.52 rot/E=0.50 37ms  | h=15 cmp/L=11.69 rot/E=0.43 29ms |
+| n=5000 5% lect / 95% escr | h=15 cmp/L=11.55 rot/E=0.50 160ms | h=16 cmp/L=11.71 rot/E=0.42 44ms |
++---------------------------+-----------------------------------+----------------------------------+
+cmp/L = comparaciones por lectura (profundidad media); rot/E = rotaciones por escritura.
+
+============================================================================
+  P07 - Peor patron de entrada: inserciones en orden ascendente (carga de pallets ya ordenada)
+============================================================================
++------+--------------------+--------------------+
+| n    | AVL                | Rojo-Negro         |
++------+--------------------+--------------------+
+| 1000 | h=10 rot=990 7ms   | h=17 rot=983 2ms   |
+| 5000 | h=13 rot=4987 38ms | h=22 rot=4978 10ms |
++------+--------------------+--------------------+
+Lectura: AVL mantiene el arbol mas bajo (mejor para lecturas); Rojo-Negro rota menos por escritura (mejor para escrituras).
+
+============================================================================
+  P08 - Cola de Carga (DLL) + Transacciones Undo/Rollback (Pila LIFO)
+============================================================================
+Cargar 101,102,103 + intercalar 102B tras 102 : ['G-101', 'G-102', 'G-102B', 'G-103'] | OK (4 nodos, pila=4)
+Mover G-103 al inicio                         : ['G-103', 'G-101', 'G-102', 'G-102B'] | OK (4 nodos, pila=5)
+Quitar G-101                                  : ['G-103', 'G-102', 'G-102B'] | OK (3 nodos, pila=6)
+UNDO (restaura G-101 en su posicion)          : ['G-103', 'G-101', 'G-102', 'G-102B'] | OK (4 nodos, pila=5)
+UNDO (deshace el movimiento de G-103)         : ['G-101', 'G-102', 'G-102B', 'G-103'] | OK (4 nodos, pila=4)
+UNDO (quita G-102B)                           : ['G-101', 'G-102', 'G-103'] | OK (3 nodos, pila=3)
+Nodo removido vivo en memoria con la pila activa: True | tras commit(): False (liberado)
+Historial acotado (max_history=100): 1000 cargas -> pila=100 (memoria de auditoria constante)
+
+============================================================================
+  P08 - Benchmark: operaciones O(1) por transaccion y rollback masivo
+============================================================================
++----------+----------+-----------+----------+---------+----------------+--------------------------+
+| Paquetes | us/carga | us/quitar | us/mover | us/undo | Deshechas/Pila | Invariantes + cola vacia |
++----------+----------+-----------+----------+---------+----------------+--------------------------+
+| 2000     | 0.90     | 0.53      | 0.94     | 0.40    | 3500/3500      | OK                       |
+| 20000    | 1.01     | 0.62      | 1.06     | 0.43    | 35000/35000    | OK                       |
+| 200000   | 1.69     | 1.27      | 2.36     | 0.59    | 350000/350000  | OK                       |
++----------+----------+-----------+----------+---------+----------------+--------------------------+
+Lectura: el costo por operacion es ~constante al crecer n x100 => O(1); el rollback total deja la cola vacia e integra.
+
+============================================================================
+  P09 - Proximidad Espacial: KD-Tree vs Cuadricula vs Geohash vs Fuerza Bruta
+============================================================================
+Consulta (10.0, 10.0) km, k=3 | geohash de la consulta: d34k41 (celda ~1.22 x 0.61 km)
+  Fuerza bruta : [('M-00017', 2.64), ('M-00007', 3.13), ('M-00027', 3.68)]
+  KD-Tree      : [('M-00017', 2.64), ('M-00007', 3.13), ('M-00027', 3.68)]
+  Cuadricula   : [('M-00017', 2.64), ('M-00007', 3.13), ('M-00027', 3.68)]
+  Geohash      : [('M-00017', 2.64), ('M-00007', 3.13), ('M-00027', 3.68)]
+Paridad con fuerza bruta en 300 consultas aleatorias (300 mensajeros, k=5): fallos {'kd': 0, 'grid': 0, 'geohash': 0}
+
+============================================================================
+  P09 - Consulta estatica k=5: construccion y tiempo por consulta (us)
+============================================================================
++------------+-------------------------------+------------+-----------+--------------+
+| Mensajeros | KD build ms / us por consulta | Cuadricula | Geohash   | Fuerza bruta |
++------------+-------------------------------+------------+-----------+--------------+
+| 1000       | 1.4 / 13                      | 0.8 / 13   | 3.4 / 152 | - / 293      |
+| 5000       | 8.7 / 24                      | 4.2 / 42   | 16.8 / 96 | - / 1755     |
++------------+-------------------------------+------------+-----------+--------------+
+
+============================================================================
+  P09 - Flota movil: costo de UN tick (todos se mueven + Q consultas k=5), n=2000
+============================================================================
++----------------+------------------+------------+----------+--------------+-------------------------+
+| Consultas/tick | KD (reconstruir) | Cuadricula | Geohash  | Fuerza bruta | Mas rapido              |
++----------------+------------------+------------+----------+--------------+-------------------------+
+| 1              | 2.9 ms           | 0.8 ms     | 6.6 ms   | 0.6 ms       | Fuerza bruta            |
+| 20             | 3.4 ms           | 1.2 ms     | 9.0 ms   | 11.4 ms      | Cuadricula (actualizar) |
+| 200            | 5.9 ms           | 4.7 ms     | 33.8 ms  | 118.2 ms     | Cuadricula (actualizar) |
+| 1000           | 16.8 ms          | 21.2 ms    | 134.4 ms | 642.5 ms     | KD (reconstruir)        |
++----------------+------------------+------------+----------+--------------+-------------------------+
+Lectura: con 1 consulta por tick, ni siquiera conviene indexar (la fuerza bruta evita el costo de mantener el indice); con pocas, actualizar celdas (O(1) por agente) vence a reconstruir el KD (O(n log n)); con muchas consultas por tick, la reconstruccion se amortiza y el KD (consulta ~O(log n)) alcanza o supera a las cuadriculas.
+
+============================================================================
+  P10 - Red de Fibra Optica entre 40 Centros Logisticos (780 aristas candidatas)
+============================================================================
+Aristas candidatas=780 | Aristas en el MST=39 (= V-1)
+Costo MST: Kruskal=440.345 | Prim-Heap=440.345 | Prim-Denso=440.345 | coinciden: True
+Costo de tender TODOS los enlaces candidatos: 43,618.0 -> el MST cuesta 1.0% de eso
+Kruskal: aristas examinadas=124/780 (corta al completar V-1), pasos Union-Find=356 | Prim-Heap: push=780, pop=124
+Primeros enlaces elegidos (u, v, costo): [(1, 39, 2.599), (14, 18, 2.715), (14, 19, 2.816), (10, 15, 3.698), (24, 37, 3.811)]
+
+============================================================================
+  P10 - Barrido de densidad (V=150): tiempo (ms, mejor de 5) y operaciones
+============================================================================
++----------+-------+---------+-----------+------------+-----------+-------------------+--------------+--------------+------------+
+| Densidad | E     | Kruskal | Prim-Heap | Prim-Denso | (+matriz) | Op Kruskal ~ElogE | Op Prim-Heap | Op Denso V^2 | Mas rapido |
++----------+-------+---------+-----------+------------+-----------+-------------------+--------------+--------------+------------+
+| 0.05     | 558   | 0.28    | 0.18      | 0.74       | +0.11     | 5,091             | 931          | 22,500       | Prim-Heap  |
+| 0.10     | 1117  | 0.33    | 0.32      | 0.75       | +0.11     | 11,310            | 1,661        | 22,500       | Prim-Heap  |
+| 0.20     | 2235  | 0.52    | 0.49      | 0.74       | +0.23     | 24,866            | 2,706        | 22,500       | Prim-Heap  |
+| 0.40     | 4470  | 1.16    | 1.07      | 0.93       | +0.38     | 54,203            | 4,940        | 22,500       | Prim-Denso |
+| 0.60     | 6705  | 1.72    | 1.39      | 0.79       | +0.47     | 85,227            | 6,990        | 22,500       | Prim-Denso |
+| 0.80     | 8940  | 2.41    | 2.12      | 0.89       | +0.70     | 117,346           | 9,267        | 22,500       | Prim-Denso |
+| 1.00     | 11175 | 3.13    | 2.49      | 0.79       | +0.81     | 150,281           | 11,592       | 22,500       | Prim-Denso |
++----------+-------+---------+-----------+------------+-----------+-------------------+--------------+--------------+------------+
+Lectura: en grafos dispersos Kruskal/Prim-Heap hacen ~E log E / ~E log V operaciones (E << V^2); al acercarse a E ~ V^2 el costo log del heap/ordenamiento pesa y Prim con arreglo O(V^2) se vuelve competitivo (si ya se tiene la matriz).
